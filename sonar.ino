@@ -65,7 +65,7 @@ void setup()
   myGLCD.InitLCD();                                    // инициируем дисплей (в качестве параметра данной функции можно указать ориентацию дисплея: PORTRAIT или LANDSCAPE), по умолчанию LANDSCAPE - горизонтальная ориентация
   myGLCD.clrScr();                                     // стираем всю информацию с дисплея
   r = EEPROM.read(0);                                  //связываем переменные, нуждающиеся в сохранении,с энергонезависимой памятью(нужно для сохранения настроек)
-  g = EEPROM.read(1);
+  g = EEPROM.read(1);                                  //в первый раз по дефолту вернет 255
   b = EEPROM.read(2);
   servoStep = EEPROM.read(3);
   maxDist = EEPROM.read(4) * stepDist;
