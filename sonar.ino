@@ -1,29 +1,31 @@
 
-#include "UTFT.h" // подключение библиотеки UTFT
+#include "UTFT.h"                                      
+#include "Ultrasonic.h"
 #include <Servo.h>
 #include <EEPROM.h>
-#include "TouchScreen.h" // подключение библиотеки TouchScreen
-extern uint8_t SmallFont[]; // подключение шрифтов
+#include "TouchScreen.h"
+extern uint8_t SmallFont[];
 extern uint8_t BigFont[];
-// Определение пинов для радаров
+//Определяем пины для радара и серво
 #define trigPin 10
 #define echoPinF 11
 #define echoPinB 12
 #define servoPin 13
 
-int maxDist;        // максимальное расстояние измерения
-#define stepDist 5 // шаг для настроек максимального расстояния
-#define clipDist 400
-int servoStep;
-#define stepServo 1
-#define R 115     //радиус окружности 
-#define Xo 165    //центр окружности
-#define Yo 120
-#define RS  A2                                          //пины для подключения дисплея
-#define WR  A1                                          //
-#define CS  A3                                          //
-#define RST A4                                          //
-#define SER A0                                          //
+int maxDist;
+#define stepDist 5                                   //шаг изменения расстояния обнаружения предметов
+#define clipDist 400                                 // предельное расстояние измерения
+int servoStep;                                       //шаг угла поворота серво
+#define stepServo 1                                 //начальная скорость вращения серво
+#define R 115                                       // радиус отрисовываемой окружности
+#define Xo 165                                      // х координата центра окружности
+#define Yo 120                                      // у координата центра окружности
+//Определяем пины для подключения дисплея
+#define RS  A2                                                                        
+#define WR  A1                                          
+#define CS  A3                                         
+#define RST A4                                         
+#define SER A0                                          
 //Определяем выводы используемые для чтения данных с TouchScreen:
 #define YP  A2                                          // Вывод Y+ должен быть подключен к аналоговому входу
 #define XM  A3                                          // Вывод X- должен быть подключен к аналоговому входу
@@ -34,58 +36,72 @@ int servoStep;
 #define tsMinY   110                                    // соответствующий точке начала координат по оси Y
 #define tsMaxX   955                                    // соответствующий максимальной точке координат по оси X
 #define tsMaxY   910                                    // соответствующий максимальной точке координат по оси Y
-#define minPress 10                                     // соответствующий минимальной степени нажатия на TouchScreen
+#define  10                                     // соответствующий минимальной степени нажатия на TouchScreen
 #define maxPress 1000                                   // соответствующий максимальной степени нажатия на TouchScreen
 #define mstk 10
 
+#define ServiceMode 0                                   // для перехода в режим отладки меняем значение на 1
+/*
+  Сервисный режим необходим для калибровки опорных значений
+  Подробнее:
+  https://wiki.iarduino.ru/page/rabota-s-touchscreen/
+  раздел "Калибровка"
+*/
 
-//Переменные для расстояния
-long duration;
-int distF, distB, x, y;
-int degree = 0;
-bool forward = true;
+
+int distF, distB, x, y;                                  //переменные для считывания информации с радаров
+int degree = 0;                                          //начальный угол поворота серво
+bool forward = true;                                     //флаг для проверки валидности угла поворота
 int X, Y, Z;
 byte r, g, b;
-Servo servo; // объект серво-двигателя
-//UTFT myGLCD(TFT28UNO, A2, A1, A3, A4, A0);       // тип дисплея 2,4  UNO  (320x240 chip ILI9341)
-UTFT myGLCD(TFT28UNO, RS, WR, CS, RST, SER);    // объект для работы с дисплеем
-TouchScreen ts = TouchScreen(XP, YP, XM, YM);      //объект для работы с TouchScreen
-//объявление основных методов
-void GetDistance(float);
-bool touch();
-void mainScreen();
-void openMenu();
+Servo servo;                                            //объект серводвигателя
+Ultrasonic sonarF (trigPin, echoPinF);                  //объект переднего радара
+Ultrasonic sonarB (trigPin, echoPinB);                  //объект заднего радара
+//UTFT myGLCD(TFT28UNO, A2, A1, A3, A4, A0);            // тип дисплея 2,4  UNO  (320x240 chip ILI9341)
+UTFT myGLCD(TFT28UNO, RS, WR, CS, RST, SER);            // объект для работы с дисплеем
+TouchScreen ts = TouchScreen(XP, YP, XM, YM);           // объект для работы с TouchScreen
+
+void GetDistance(float);                                //функция снятия показаний радаров и вывода данных на дисплей
+void Service();                                         //функция вызова режима отладки
+bool touch();                                           //функция,определяющая касание
+void mainScreen();                                      //функция, определяющая вид главного экрана
+void openMenu();                                        //функция вызова меню настроек
 
 void setup()
 {
-  pinMode(trigPin, OUTPUT); 
-  pinMode(echoPinF, INPUT); 
-  pinMode(echoPinB, INPUT); 
-  servo.attach(servoPin); 
-  myGLCD.InitLCD();                                    // инициируем дисплей (в качестве параметра данной функции можно указать ориентацию дисплея: PORTRAIT или LANDSCAPE), по умолчанию LANDSCAPE - горизонтальная ориентация
-  myGLCD.clrScr();                                     // стираем всю информацию с дисплея
-  r = EEPROM.read(0);                                  //связываем переменные, нуждающиеся в сохранении,с энергонезависимой памятью(нужно для сохранения настроек)
-  g = EEPROM.read(1);                                  //в первый раз по дефолту вернет 255
+  pinMode(trigPin, OUTPUT);                             // определяем trigPin как вывод
+  pinMode(echoPinF, INPUT);                             // определяем echoPin как вывод
+  pinMode(echoPinB, INPUT);                             // определяем echoPin как вывод
+  servo.attach(servoPin);                               // инициируем порт для серво
+  myGLCD.InitLCD();                                     // инициируем дисплей (в качестве параметра данной функции можно указать ориентацию дисплея: PORTRAIT или LANDSCAPE), по умолчанию LANDSCAPE - горизонтальная ориентация
+  myGLCD.clrScr();                                      // стираем всю информацию с дисплея
+  if (ServiceMode) {
+    Serial.begin(9600);                                 // инициируем передачу данных в монитор последовательного порта на скорости 9600 бит/сек
+    maxDist = EEPROM.read(4) * stepDist;                //определяем начальное максимальное расстояние воздействия при первом запуске
+    Service();
+  }
+  r = EEPROM.read(0);                                   //берем данные о цветах из энергонезависимой памяти (цвета определяются там при первом запуске в режиме отладки)
+  g = EEPROM.read(1);                                   
   b = EEPROM.read(2);
-  servoStep = EEPROM.read(3);
-  maxDist = EEPROM.read(4) * stepDist;
-  mainScreen(); 
+  servoStep = EEPROM.read(3);                           //берем данные о шаге угла поворота серво из эп                                                 
+  maxDist = EEPROM.read(4) * stepDist;                  //берем данные о максимальном расстоянии воздействия из эп
+  mainScreen();
 }
 void loop()
 {
-  if ((degree < 0) || (degree > 180)) { //проверка валидности угла
+  if ((degree < 0) || (degree > 180)) {                 //проверка валидности угла
     forward = !forward;
   }
 
-  myGLCD.setColor(r, g, b);                           //выбор цвета
-  servo.write(degree);                                //поворот двигателя
+  myGLCD.setColor(r, g, b);                            //определяем цвет для рисования
+  servo.write(degree);                                 //считываем угол поворота серво
   delay(20);
-  GetDistance(degree * DEG_TO_RAD);                   //вычисляем и отрисовываем луч
+  GetDistance(degree * DEG_TO_RAD);                    
   delay(5);
 
-  if ((touch()) && (X < 21) && (Y < 21)) openMenu(); //проверяем,нажата ли кнопка вызова меню, если да- переходим в режим настроек
+  if ((touch()) && (X < 21) && (Y < 21)) openMenu();
 
-  if (forward) {                                     //проверка валидности угла и расчет следующего угла поворота
+  if (forward) {
     degree += servoStep;
   }
   else {
@@ -93,31 +109,65 @@ void loop()
   }
 }
 void GetDistance(float degree) {
-  digitalWrite(trigPin, LOW);
-  delayMicroseconds(2);
-  digitalWrite(trigPin, HIGH);//отправляем ультразвуковой сигнал
-  delayMicroseconds(10);
-  digitalWrite(trigPin, LOW);
-  duration = pulseIn(echoPinF, HIGH); // считываем информацию с эхопина front радара, длительность импульса в мс
-  distF = constrain((duration * 0.034 / 2), 0, maxDist);//рассчитывем расстояние, умножая время на скорость звука,и делим на два,так как звук преодолел расстояние до объекта и обратно
-  duration = pulseIn(echoPinB, HIGH); // считываем информацию с эхопина back радара, длительность импульса в мс
-  distB = constrain((duration * 0.034 / 2), 0, maxDist);
+  distF = constrain((sonarF.Timing() / 59.4), 0, maxDist); //считываем информацию с переднего радара
+  delay(50);
+  distB = constrain((sonarB.Timing() / 59.4), 0, maxDist); //считываем информацию с заднего радара
 
-  x = (map(maxDist, 0, maxDist, 0, R) * cos(degree)); //задаем новые значения для x относительно окружности радиуса R (чтоб луч не выходил за пределы окружности)
-  y = (map(maxDist, 0, maxDist, 0, R) * sin(degree)); //задаем новые значения для y относительно окружности радиуса R (чтоб луч не выходил за пределы окружности)
-  myGLCD.setColor(0, 0, 0);
-  myGLCD.drawLine(Xo, Yo, x + Xo, y + Yo);            //строим луч из центра окружности(по факту заполняем круг черными лучами)
-  myGLCD.drawLine(Xo, Yo, Xo - x, Yo - y);            
-  myGLCD.setColor(r, g, b);
-  x = (map(distF, 0, maxDist, 0, R) * cos(degree));  //задаем значение x относительно считанных с радара данных
-  y = (map(distF, 0, maxDist, 0, R) * sin(degree));  //задаем значение y относительно считанных с радара данных
-  myGLCD.drawLine(Xo, Yo, x + Xo, y + Yo); //строим луч, длины, пропорциональной расстоянию до объекта
+  x = (map(maxDist, 0, maxDist, 0, R) * cos(degree));      //получаем координаты для построения отрезка
+  y = (map(maxDist, 0, maxDist, 0, R) * sin(degree));
+  myGLCD.setColor(0, 0, 0);                                //выбираем цвет для отрисовки    
+  myGLCD.drawLine(Xo, Yo, x + Xo, y + Yo);                 //по факту просто заполняем круг радиуса R черными лучами
+
+  myGLCD.drawLine(Xo, Yo, Xo - x, Yo - y);
+  myGLCD.setColor(r, g, b);                               
+  x = (map(distF, 0, maxDist, 0, R) * cos(degree));
+  y = (map(distF, 0, maxDist, 0, R) * sin(degree));
+  myGLCD.drawLine(Xo, Yo, x + Xo, y + Yo);                //строим отрезки по данным с радаров
   x = (map(distB, 0, maxDist, 0, R) * cos(degree));
   y = (map(distB, 0, maxDist, 0, R) * sin(degree));
- 
-  myGLCD.drawLine(Xo, Yo, Xo - x, Yo - y); 
+  myGLCD.drawLine(Xo, Yo, Xo - x, Yo - y);
 }
 
+void Service() {
+  Serial.println("Xa = (analog) \t Ya = (analog)");
+  Serial.println("Xd = (digital) \t Yd = (digital)");
+  Serial.print("MaxDist=");
+  Serial.println(maxDist);
+  myGLCD.setColor(0, 200, 0);
+  myGLCD.setFont(BigFont);
+  myGLCD.print("Restoring Complete", CENTER, 20);
+  myGLCD.setColor(200, 200, 200);
+  myGLCD.print("Service", CENTER, 200);
+  EEPROM.update(0, 0);                                  //вносим в энергонезависимую память данные о цветах(0-2),шаге угла поворота серво(3) и радиусе воздействия(4).
+  EEPROM.update(1, 0);
+  EEPROM.update(2, 255);
+  EEPROM.update(3, 1);
+  EEPROM.update(4, 8);
+
+  while (true) {
+    ///*
+    distF = constrain((sonarF.Timing() / 59.4), 0, maxDist); //проверка работоспособности радаров, смотрим показания в Мониторе порта
+    Serial.print(distF);                                     //при необходимости калибровки дисплея, комментируем данный блок,раскомменчиваем блок ниже и перепрошиваем
+    Serial.print("\t");
+    delay(50);
+    distB = constrain((sonarB.Timing() / 59.4), 0, maxDist);
+    Serial.println(distB);
+    //*/
+
+    /*
+      TSPoint p = ts.getPoint();                             // Считываем координаты и интенсивность нажатия на TouchScreen в структуру p
+      pinMode(XM, OUTPUT);                                   // Возвращаем режим работы вывода X- в значение «выход» для работы с дисплеем
+      pinMode(YP, OUTPUT);                                   // Возвращаем режим работы вывода Y+ в значение «выход» для работы с дисплеем
+      if (p.z > minPress && p.z < maxPress) {                // Если степень нажатия достаточна для фиксации координат TouchScreen
+      Serial.println((String) "X = " + p.x + " \t Y = " + p.y);
+      p.x = map(p.x, tsMinX, tsMaxX, 0, 320);              // Преобразуем значение p.x от диапазона tsMinX...tsMaxX, к диапазону 0...320
+      p.y = map(p.y, tsMinY, tsMaxY, 0, 240);              // Преобразуем значение p.y от диапазона tsMinY...tsMaxY, к диапазону 0...240
+      Serial.println((String) "X = " + p.x + " \t Y = " + p.y);
+      myGLCD.fillCircle(p.x, p.y, 3);                      // Прорисовываем окружность диаметром 3 пикселя с центром в точке координат считанных с TouchScreen
+      }
+      //*/
+  }
+}
 
 bool touch() {
   TSPoint p = ts.getPoint();                             // Считываем координаты и интенсивность нажатия на TouchScreen в структуру p
@@ -138,6 +188,7 @@ bool touch() {
     return false;
   }
 }
+
 void openMenu() {
   bool menuOn = true;
   byte i, j, Re = r, Gr = g, Bl = b;
@@ -146,8 +197,8 @@ void openMenu() {
     {{255, 0, 0}, {0, 255, 0}, {0, 0, 255}},
     {{255, 255, 0}, {0, 255, 255}, {255, 0, 255}}
   };
-  myGLCD.clrScr();
-  myGLCD.setFont(BigFont);
+  myGLCD.clrScr();                                         //очистка дисплея
+  myGLCD.setFont(BigFont);                                //выбор шрифта  
   myGLCD.setColor(200, 200, 200);
   myGLCD.print("MENU", CENTER, 5);
   myGLCD.print("Save", 250, 221, 0);
@@ -159,7 +210,7 @@ void openMenu() {
   myGLCD.setFont(BigFont);
   myGLCD.print("MaxDist", 5, 115, 0);
   //-
-  myGLCD.drawRect(135, 115, 165, 145);
+  myGLCD.drawRect(135, 115, 165, 145);                 //отрисовываем кнопки
   myGLCD.fillRect(138, 128, 162, 132);
   //dst
   myGLCD.drawRect(165, 115, 225, 145);
@@ -190,20 +241,20 @@ void openMenu() {
   myGLCD.fillRect(167, 166, 223, 174);
   myGLCD.setColor(200, 200, 200);
   myGLCD.setFont(BigFont);
-  myGLCD.printNumI(d, 170, 122);
+  myGLCD.printNumI(d, 170, 122);                                                   //выводим на дисплей значения maxDist и servoStep 
   myGLCD.printNumI(sst, 170, 172);
   for (i = 0; i < 3; i++) {
     for (j = 0; j < 2; j++) {
       myGLCD.setColor(rgb[j][i][0], rgb[j][i][1], rgb[j][i][2]);
-      myGLCD.fillRect(100 + (i * 30), 30 + (j * 30), 130 + (i * 30), 60 + (j * 30));
+      myGLCD.fillRect(100 + (i * 30), 30 + (j * 30), 130 + (i * 30), 60 + (j * 30)); //выводим закрашенный прямоугольник
     }
   }
 
-  while (menuOn) {// main menu
+  while (menuOn) {
     if ((touch()) && (Y > 219) && ((Z > minPress) && (Z < maxPress))) {
-      if (X < 103) menuOn = false;
+      if (X < 103) menuOn = false;                                                 //закрываем меню                                             
       else {
-        if (X > 245) {
+        if (X > 245) {                                                             //нажатие на кнопку "save"->сохранение новых настроек 
           menuOn = false;
           myGLCD.setColor(127, 255, 0);
           myGLCD.print("Saved", 235, 200, 0);
@@ -223,7 +274,7 @@ void openMenu() {
       }
     }
     else {
-      if ((Z > minPress) && (Z < maxPress)) {
+      if ((Z > minPress) && (Z < maxPress)) {                                    //в этом блоке путем проверки координат места нажатия делаем выбор цвета вывода данных с радара
         switch (Y) {
           case 30 ... 90:
             switch (Y) {
@@ -268,7 +319,7 @@ void openMenu() {
             }
 
             break;
-          case 115 ... 145:
+          case 115 ... 145:                                                            //в этом блоке путем проверки координат нажатия делаем выбор скорости вращения серво
             switch (X) {
               case 135 ... 165:
                 if (d >= stepDist) d -= stepDist;
@@ -289,20 +340,20 @@ void openMenu() {
             }
             break;
         }
-        myGLCD.setColor(Re, Gr, Bl);
+        myGLCD.setColor(Re, Gr, Bl);                                              
         myGLCD.fillCircle(250, 60, 30);
         myGLCD.setColor(0, 0, 0);
         myGLCD.fillRect(167, 116, 223, 144);
         myGLCD.fillRect(167, 166, 223, 174);
         myGLCD.setColor(200, 200, 200);
         myGLCD.setFont(BigFont);
-        myGLCD.printNumI(d, 170, 122);
-        myGLCD.printNumI(sst, 170, 172);
+        myGLCD.printNumI(d, 170, 122);                                              //вывод новых настроек
+        myGLCD.printNumI(sst, 170, 172);                                            
         delay(150);
       }
     }
   }
-  degree = 0;
+  degree = 0;                                                                      //задаем переменным значения для начала новой работы
   forward = true;
   mainScreen();
 }

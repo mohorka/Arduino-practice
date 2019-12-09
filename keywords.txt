@@ -1,7 +1,14 @@
+Ultrasonic	KEYWORD3
+Timing	KEYWORD3
+Ranging	KEYWORD3
+CM	LITERAL1	Constants
+INC	LITERAL1	Constants
+
 UTFT	KEYWORD1
 InitLCD	KEYWORD2
 clrScr	KEYWORD2
 fillScr	KEYWORD2
+
 setColor	KEYWORD2
 setBackColor	KEYWORD2
 getColor	KEYWORD2
